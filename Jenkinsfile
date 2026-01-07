@@ -8,12 +8,13 @@ pipeline {
 
   parameters {
     choice(name: 'ENV', choices: ['dev', 'prod'], description: 'Target environment')
-    booleanParam(name: 'APPLY', defaultValue: false, description: 'Apply? (dev auto; prod requires APPLY=true + approval)')
+    booleanParam(name: 'APPLY', defaultValue: false, description: 'Apply? (dev auto; prod requires APPLY=true + manual approval)')
   }
 
   environment {
     AWS_REGION = "eu-central-1"
     TF_IN_AUTOMATION = "true"
+    AWS_EC2_METADATA_DISABLED = "true"   // prevent IMDS lookup delays on non-EC2 nodes
   }
 
   stages {
@@ -25,6 +26,7 @@ pipeline {
     stage('Tooling sanity check') {
       steps {
         sh """
+          set -e
           terraform version
           aws --version
           kubectl version --client
@@ -34,19 +36,25 @@ pipeline {
       }
     }
 
-    stage('Terraform fmt/validate') {
+    stage('Terraform fmt/validate/init') {
       steps {
-        dir("terraform/envs/${params.ENV}") {
-          sh """
-            terraform fmt -check -recursive
-            terraform init -input=false
-            terraform validate
-          """
+        withCredentials([[
+          $class: 'AmazonWebServicesCredentialsBinding',
+          credentialsId: 'awscreds'
+        ]]) {
+          dir("terraform/envs/${params.ENV}") {
+            sh """
+              set -e
+              terraform fmt -check -recursive
+              terraform init -input=false
+              terraform validate
+            """
+          }
         }
       }
     }
 
-    stage('Terraform plan (PR only)') {
+    stage('Terraform plan (PR)') {
       when { changeRequest() }
       steps {
         withCredentials([[
@@ -55,6 +63,7 @@ pipeline {
         ]]) {
           dir("terraform/envs/${params.ENV}") {
             sh """
+              set -e
               terraform init -input=false
               terraform plan -out=tfplan -input=false
               terraform show -no-color tfplan > plan.txt
@@ -65,7 +74,7 @@ pipeline {
       }
     }
 
-    stage('Terraform plan (branch)') {
+    stage('Terraform plan (Branch)') {
       when { not { changeRequest() } }
       steps {
         withCredentials([[
@@ -74,6 +83,7 @@ pipeline {
         ]]) {
           dir("terraform/envs/${params.ENV}") {
             sh """
+              set -e
               terraform init -input=false
               terraform plan -out=tfplan -input=false
               terraform show -no-color tfplan > plan.txt
@@ -84,7 +94,7 @@ pipeline {
       }
     }
 
-    stage('Approval (prod)') {
+    stage('Approval (prod only)') {
       when {
         allOf {
           not { changeRequest() }
@@ -93,7 +103,7 @@ pipeline {
         }
       }
       steps {
-        input message: "Apply to PROD? Confirm?", ok: "Yes, apply"
+        input message: "Apply changes to PROD?", ok: "Yes, apply"
       }
     }
 
@@ -102,7 +112,9 @@ pipeline {
         allOf {
           not { changeRequest() }
           expression {
+            // dev: auto-apply
             if (params.ENV == 'dev') return true
+            // prod: only when APPLY=true (and approval stage will gate it)
             return params.APPLY == true
           }
         }
@@ -114,6 +126,7 @@ pipeline {
         ]]) {
           dir("terraform/envs/${params.ENV}") {
             sh """
+              set -e
               terraform init -input=false
               terraform apply -input=false -auto-approve tfplan
               terraform output -json > tf_outputs.json
@@ -132,6 +145,7 @@ pipeline {
           credentialsId: 'awscreds'
         ]]) {
           sh """
+            set -e
             ansible-playbook -i localhost, -c local ansible/playbooks/10-bootstrap-cluster.yml -e env=${params.ENV} -e region=${env.AWS_REGION}
             ansible-playbook -i localhost, -c local ansible/playbooks/20-ns-cm-secret-rbac.yml -e env=${params.ENV}
             ansible-playbook -i localhost, -c local ansible/playbooks/30-calico-and-policies.yml -e env=${params.ENV}
@@ -144,8 +158,23 @@ pipeline {
     stage('Smoke test') {
       when { not { changeRequest() } }
       steps {
-        sh "bash scripts/smoke_test.sh"
+        sh """
+          set -e
+          bash scripts/smoke_test.sh
+        """
       }
+    }
+  }
+
+  post {
+    always {
+      // Helpful debug context without leaking secrets
+      sh """
+        echo "=== Debug context ==="
+        echo "ENV=${ENV}"
+        echo "BRANCH_NAME=${BRANCH_NAME}"
+        echo "CHANGE_ID=${CHANGE_ID}"
+      """
     }
   }
 }
