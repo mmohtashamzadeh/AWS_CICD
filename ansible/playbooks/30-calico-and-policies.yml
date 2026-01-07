@@ -1,0 +1,68 @@
+- name: Install Calico and apply NetworkPolicies
+  hosts: localhost
+  gather_facts: false
+  vars:
+    kubeconfig_path: "{{ lookup('env','WORKSPACE') | default('') }}/.kube/config"
+    calico_manifest: "https://raw.githubusercontent.com/projectcalico/calico/v3.27.0/manifests/calico.yaml"
+  tasks:
+    - name: Install Calico
+      shell: kubectl apply -f {{ calico_manifest }}
+      environment: { KUBECONFIG: "{{ kubeconfig_path }}" }
+
+    - name: Default deny all in app namespace
+      shell: |
+        cat <<'YAML' | kubectl apply -f -
+        apiVersion: networking.k8s.io/v1
+        kind: NetworkPolicy
+        metadata:
+          name: default-deny
+          namespace: app
+        spec:
+          podSelector: {}
+          policyTypes: [Ingress, Egress]
+        YAML
+      environment: { KUBECONFIG: "{{ kubeconfig_path }}" }
+
+    - name: Allow ingress only from ingress-nginx namespace
+      shell: |
+        cat <<'YAML' | kubectl apply -f -
+        apiVersion: networking.k8s.io/v1
+        kind: NetworkPolicy
+        metadata:
+          name: allow-from-ingress
+          namespace: app
+        spec:
+          podSelector: {}
+          ingress:
+          - from:
+            - namespaceSelector:
+                matchLabels:
+                  kubernetes.io/metadata.name: ingress-nginx
+          policyTypes: [Ingress]
+        YAML
+      environment: { KUBECONFIG: "{{ kubeconfig_path }}" }
+
+    - name: Allow egress DNS only
+      shell: |
+        cat <<'YAML' | kubectl apply -f -
+        apiVersion: networking.k8s.io/v1
+        kind: NetworkPolicy
+        metadata:
+          name: allow-dns
+          namespace: app
+        spec:
+          podSelector: {}
+          egress:
+          - to:
+            - namespaceSelector:
+                matchLabels:
+                  kubernetes.io/metadata.name: kube-system
+            ports:
+            - protocol: UDP
+              port: 53
+            - protocol: TCP
+              port: 53
+          policyTypes: [Egress]
+        YAML
+      environment: { KUBECONFIG: "{{ kubeconfig_path }}" }
+

@@ -1,0 +1,10 @@
+# Terraform
+.terraform/
+*.tfstate
+*.tfstate.backup
+*.tfvars
+**/terraform-provider-*
+
+# Binaries
+kubectl
+helm

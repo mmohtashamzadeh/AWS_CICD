@@ -1,0 +1,47 @@
+- name: Bootstrap EKS addons (helm/kubectl from Jenkins)
+  hosts: localhost
+  gather_facts: false
+  vars:
+    kubeconfig_path: "{{ lookup('env','WORKSPACE') | default('') }}/.kube/config"
+    region: "{{ region | default(lookup('env','AWS_REGION') | default('eu-central-1')) }}"
+    cluster_name: "my-eks-{{ env }}"
+  tasks:
+    - name: Ensure kube dir exists
+      file:
+        path: "{{ (lookup('env','WORKSPACE') | default('.')) + '/.kube' }}"
+        state: directory
+        mode: "0700"
+
+    - name: Update kubeconfig for EKS
+      shell: >
+        aws eks update-kubeconfig
+        --region {{ region }}
+        --name {{ cluster_name }}
+        --kubeconfig {{ kubeconfig_path }}
+
+    - name: Verify cluster access (kubectl)
+      shell: kubectl get ns
+      environment:
+        KUBECONFIG: "{{ kubeconfig_path }}"
+
+    - name: Add helm repos
+      shell: |
+        helm repo add ingress-nginx https://kubernetes.github.io/ingress-nginx
+        helm repo add metrics-server https://kubernetes-sigs.github.io/metrics-server/
+        helm repo update
+
+    - name: Install ingress-nginx
+      shell: >
+        helm upgrade --install ingress-nginx ingress-nginx/ingress-nginx
+        --namespace ingress-nginx --create-namespace
+        -f k8s/values/ingress-nginx-values.yaml
+      environment:
+        KUBECONFIG: "{{ kubeconfig_path }}"
+
+    - name: Install metrics-server
+      shell: >
+        helm upgrade --install metrics-server metrics-server/metrics-server
+        --namespace kube-system
+      environment:
+        KUBECONFIG: "{{ kubeconfig_path }}"
+
