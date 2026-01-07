@@ -134,12 +134,76 @@ resource "aws_eks_cluster" "this" {
   vpc_config {
     subnet_ids              = concat(aws_subnet.public[*].id, aws_subnet.private[*].id)
     endpoint_public_access  = true
-    endpoint_private_access = false
+    endpoint_private_access = true
     public_access_cidrs     = var.eks_public_access_cidrs
   }
 
   depends_on = [
     aws_iam_role_policy_attachment.eks_cluster_policy
   ]
+}
+
+########################
+# IAM: EKS Node Group
+########################
+data "aws_iam_policy_document" "eks_node_assume" {
+  statement {
+    actions = ["sts:AssumeRole"]
+    principals {
+      type        = "Service"
+      identifiers = ["ec2.amazonaws.com"]
+    }
+  }
+}
+
+resource "aws_iam_role" "eks_node_role" {
+  name               = "eks-node-role-${var.env}"
+  assume_role_policy = data.aws_iam_policy_document.eks_node_assume.json
+}
+
+resource "aws_iam_role_policy_attachment" "node_worker" {
+  role       = aws_iam_role.eks_node_role.name
+  policy_arn = "arn:aws:iam::aws:policy/AmazonEKSWorkerNodePolicy"
+}
+
+resource "aws_iam_role_policy_attachment" "node_cni" {
+  role       = aws_iam_role.eks_node_role.name
+  policy_arn = "arn:aws:iam::aws:policy/AmazonEKS_CNI_Policy"
+}
+
+resource "aws_iam_role_policy_attachment" "node_ecr" {
+  role       = aws_iam_role.eks_node_role.name
+  policy_arn = "arn:aws:iam::aws:policy/AmazonEC2ContainerRegistryReadOnly"
+}
+
+########################
+# EKS Node Group
+########################
+resource "aws_eks_node_group" "this" {
+  cluster_name    = aws_eks_cluster.this.name
+  node_group_name = "ng-${var.env}"
+  node_role_arn   = aws_iam_role.eks_node_role.arn
+
+  # Nodes in private subnets
+  subnet_ids = aws_subnet.private[*].id
+
+  scaling_config {
+    desired_size = 1
+    max_size     = 1
+    min_size     = 1
+  }
+
+  instance_types = ["t3.micro"]
+  capacity_type  = "ON_DEMAND"
+
+  depends_on = [
+    aws_iam_role_policy_attachment.node_worker,
+    aws_iam_role_policy_attachment.node_cni,
+    aws_iam_role_policy_attachment.node_ecr
+  ]
+
+  tags = {
+    Name = "ng-${var.env}"
+  }
 }
 
