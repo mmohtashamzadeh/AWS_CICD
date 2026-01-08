@@ -1,47 +1,55 @@
+---
 - name: Bootstrap EKS addons (helm/kubectl from Jenkins)
   hosts: localhost
+  connection: local
   gather_facts: false
+
   vars:
-    kubeconfig_path: "{{ lookup('env','WORKSPACE') | default('') }}/.kube/config"
-    region: "{{ region | default(lookup('env','AWS_REGION') | default('eu-central-1')) }}"
     cluster_name: "my-eks-{{ env }}"
+    kubeconfig_path: "{{ lookup('env','WORKSPACE') }}/.kube/config"
+    aws_region: "{{ region }}"
+
   tasks:
-    - name: Ensure kube dir exists
+
+    - name: Ensure kubeconfig directory exists
       file:
-        path: "{{ (lookup('env','WORKSPACE') | default('.')) + '/.kube' }}"
+        path: "{{ lookup('env','WORKSPACE') }}/.kube"
         state: directory
         mode: "0700"
 
     - name: Update kubeconfig for EKS
       shell: >
         aws eks update-kubeconfig
-        --region {{ region }}
+        --region {{ aws_region }}
         --name {{ cluster_name }}
         --kubeconfig {{ kubeconfig_path }}
+      environment:
+        AWS_REGION: "{{ aws_region }}"
+      register: kubeconfig_out
+      changed_when: "'Added new context' in kubeconfig_out.stdout or 'Updated context' in kubeconfig_out.stdout"
 
     - name: Verify cluster access (kubectl)
       shell: kubectl get ns
       environment:
         KUBECONFIG: "{{ kubeconfig_path }}"
+      args:
+        chdir: "{{ lookup('env','WORKSPACE') }}"
 
-    - name: Add helm repos
+    - name: Add ingress-nginx Helm repo
       shell: |
         helm repo add ingress-nginx https://kubernetes.github.io/ingress-nginx
-        helm repo add metrics-server https://kubernetes-sigs.github.io/metrics-server/
         helm repo update
+      args:
+        chdir: "{{ lookup('env','WORKSPACE') }}"
 
     - name: Install ingress-nginx
       shell: >
         helm upgrade --install ingress-nginx ingress-nginx/ingress-nginx
-        --namespace ingress-nginx --create-namespace
+        --namespace ingress-nginx
+        --create-namespace
         -f k8s/values/ingress-nginx-values.yaml
-      environment:
-        KUBECONFIG: "{{ kubeconfig_path }}"
-
-    - name: Install metrics-server
-      shell: >
-        helm upgrade --install metrics-server metrics-server/metrics-server
-        --namespace kube-system
+      args:
+        chdir: "{{ lookup('env','WORKSPACE') }}"
       environment:
         KUBECONFIG: "{{ kubeconfig_path }}"
 
