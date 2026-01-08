@@ -23,6 +23,21 @@ pipeline {
       steps { checkout scm }
     }
 
+  stage('Who am I (AWS)') {
+  steps {
+    withCredentials([[
+      $class: 'AmazonWebServicesCredentialsBinding',
+      credentialsId: 'awscreds'
+    ]]) {
+      sh """
+        set -e
+        aws sts get-caller-identity
+      """
+    }
+  }
+}
+
+
     stage('Tooling sanity check') {
       steps {
         sh """
