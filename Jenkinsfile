@@ -188,15 +188,16 @@ pipeline {
   }
 
   post {
-    always {
-      // Helpful debug context without leaking secrets
-      sh """
-        echo "=== Debug context ==="
-        echo "ENV=${ENV}"
-        echo "BRANCH_NAME=${BRANCH_NAME}"
-        echo "CHANGE_ID=${CHANGE_ID}"
-      """
+  always {
+    script {
+      def changeId = env.CHANGE_ID ?: "N/A"
+      def branch = env.BRANCH_NAME ?: "N/A"
+      echo "=== Debug context ==="
+      echo "ENV=${params.ENV}"
+      echo "BRANCH_NAME=${branch}"
+      echo "CHANGE_ID=${changeId}"
     }
   }
 }
+
 
