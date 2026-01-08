@@ -158,6 +158,31 @@ pipeline {
       }
     }
 
+
+
+
+stage('Workspace check (k8s values)') {
+  steps {
+    sh '''
+      set -e
+      echo "PWD=$(pwd)"
+      ls -la
+      echo "---- k8s tree ----"
+      find k8s -maxdepth 3 -type f -print || true
+      echo "---- specific file ----"
+      ls -la k8s/values/ingress-nginx-values.yaml || true
+      git status --porcelain || true
+      git rev-parse --abbrev-ref HEAD || true
+      git log -1 --oneline || true
+    '''
+  }
+}
+
+
+
+
+
+
     stage('Post-provision (Ansible)') {
       when { not { changeRequest() } }
       steps {
