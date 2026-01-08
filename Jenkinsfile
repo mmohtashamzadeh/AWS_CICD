@@ -80,7 +80,10 @@ pipeline {
             sh """
               set -e
               terraform init -input=false
-              terraform plan -out=tfplan -input=false
+              pwd
+              ls -la
+              ls -la terraform.tfvars
+              terraform plan -var-file=terraform.tfvars -out=tfplan -input=false
               terraform show -no-color tfplan > plan.txt
             """
           }
@@ -99,8 +102,11 @@ pipeline {
           dir("terraform/envs/${params.ENV}") {
             sh """
               set -e
+              pwd
+              ls -la
+              ls -la terraform.tfvars
               terraform init -input=false
-              terraform plan -out=tfplan -input=false
+              terraform plan -var-file=terraform.tfvars -out=tfplan -input=false
               terraform show -no-color tfplan > plan.txt
             """
           }
