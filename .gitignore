@@ -2,7 +2,6 @@
 .terraform/
 *.tfstate
 *.tfstate.backup
-*.tfvars
 **/terraform-provider-*
 
 # Binaries
